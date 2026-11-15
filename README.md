@@ -2,6 +2,8 @@
 
 Copies Spotify playlists to YouTube Music. Free, no song limit, and it doesn't need a Spotify developer app (those now require Premium).
 
+Made from necessity 🫩
+
 ## Install
 
 ```sh
