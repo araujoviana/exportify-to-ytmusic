@@ -103,26 +103,41 @@ def find_video(yt: YTMusic, title: str, artist: str, ms: int) -> str | None:
     return None
 
 
+# After a few thousand quick searches Google answers with a "Sorry..." HTML page
+# (HTTP 403/429), which ytmusicapi surfaces as a JSONDecodeError. It lifts on its own.
+RATE_LIMIT_WAITS_MIN = (2, 5, 10, 20, 30)
+
+
 def call(fn, *args, **kwargs):
-    """Run a request, retrying network hiccups and turning auth errors into LoginExpired."""
-    for attempt in range(3):
+    """Run a request: retry network errors, wait out rate limits, raise LoginExpired on 401."""
+    errors = 0
+    limited = 0
+    while True:
         try:
             return fn(*args, **kwargs)
         except Exception as e:
             msg = str(e)
-            if "401" in msg or "403" in msg:
+            if "401" in msg:
                 raise LoginExpired from e
-            if attempt == 2:
+            if isinstance(e, json.JSONDecodeError) or "403" in msg or "429" in msg:
+                if limited == len(RATE_LIMIT_WAITS_MIN):
+                    raise
+                wait = RATE_LIMIT_WAITS_MIN[limited]
+                limited += 1
+                print(f"  YouTube is rate limiting us, waiting {wait} min...")
+                time.sleep(wait * 60)
+                continue
+            errors += 1
+            if errors == 3:
                 raise
-            wait = 10 * (attempt + 1)
-            print(f"  error: {msg[:80]} (retrying in {wait}s)")
-            time.sleep(wait)
+            print(f"  error: {msg[:80]} (retrying in {10 * errors}s)")
+            time.sleep(10 * errors)
 
 
 # ---------------------------------------------------------------- import
 
 
-def import_csv(yt: YTMusic, csv_path: Path, name: str, privacy: str, dry_run: bool) -> None:
+def import_csv(yt: YTMusic, csv_path: Path, name: str, privacy: str, dry_run: bool, delay: float) -> None:
     rows = list(csv.DictReader(csv_path.open(encoding="utf-8-sig")))
     if not rows or not field(rows[0], "title"):
         sys.exit(f"{csv_path}: doesn't look like an Exportify CSV.")
@@ -165,7 +180,7 @@ def import_csv(yt: YTMusic, csv_path: Path, name: str, privacy: str, dry_run: bo
             print(f"[{i + 1}/{len(rows)}] MISS  {label}")
         if len(batch) >= BATCH_SIZE:
             flush(i + 1)
-        time.sleep(0.3)
+        time.sleep(delay)
     flush(len(rows))
 
     missing_file = Path(f"{csv_path.stem}.missing.txt")
@@ -191,6 +206,7 @@ def main() -> None:
     imp.add_argument("--name", help="playlist name (only with a single CSV; default: file name)")
     imp.add_argument("--public", action="store_true", help="make the playlist public instead of private")
     imp.add_argument("--dry-run", action="store_true", help="only search, don't create or change playlists")
+    imp.add_argument("--delay", type=float, default=1.0, help="seconds between songs (default: 1)")
 
     sub.add_parser("reset", help="forget saved progress (playlists on YouTube Music are kept)")
 
@@ -215,7 +231,7 @@ def main() -> None:
         for path in args.csv:
             path = path.expanduser()
             name = args.name or path.stem.replace("_", " ").strip()
-            import_csv(yt, path, name, "PUBLIC" if args.public else "PRIVATE", args.dry_run)
+            import_csv(yt, path, name, "PUBLIC" if args.public else "PRIVATE", args.dry_run, args.delay)
     except LoginExpired:
         sys.exit(f"\nLogin expired. Progress is saved: run `{APP} login` again, then the same command.")
     except KeyboardInterrupt:
