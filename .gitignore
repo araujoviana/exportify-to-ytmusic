@@ -1,0 +1,9 @@
+browser.json
+headers.txt
+*.csv
+*.missing.txt
+*.log
+__pycache__/
+.venv/
+dist/
+.ruff_cache/

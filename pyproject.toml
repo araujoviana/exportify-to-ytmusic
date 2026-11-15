@@ -1,0 +1,18 @@
+[project]
+name = "exportify-to-ytmusic"
+version = "0.1.0"
+description = "Copy Spotify playlists, exported with Exportify, into YouTube Music"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["ytmusicapi>=1.10", "platformdirs>=4"]
+
+[project.scripts]
+exportify-to-ytmusic = "exportify_to_ytmusic:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
