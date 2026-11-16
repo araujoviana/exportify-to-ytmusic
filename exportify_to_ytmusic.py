@@ -106,24 +106,38 @@ def find_video(yt: YTMusic, title: str, artist: str, ms: int) -> str | None:
 # After a few thousand quick searches Google answers with a "Sorry..." HTML page
 # (HTTP 403/429), which ytmusicapi surfaces as a JSONDecodeError. It lifts on its own.
 RATE_LIMIT_WAITS_MIN = (2, 5, 10, 20, 30)
+CALM_AFTER = 100  # successful calls before the wait goes back to the shortest step
+
+
+class RateLimited(Exception):
+    pass
+
+
+# Shared across calls: a block that comes back right after a wait means it never
+# really lifted, so the next wait should be longer, not start over at 2 minutes.
+_backoff = {"step": 0, "ok": 0}
 
 
 def call(fn, *args, **kwargs):
     """Run a request: retry network errors, wait out rate limits, raise LoginExpired on 401."""
     errors = 0
-    limited = 0
     while True:
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            _backoff["ok"] += 1
+            if _backoff["ok"] >= CALM_AFTER:
+                _backoff["step"] = 0
+            return result
         except Exception as e:
             msg = str(e)
             if "401" in msg:
                 raise LoginExpired from e
             if isinstance(e, json.JSONDecodeError) or "403" in msg or "429" in msg:
-                if limited == len(RATE_LIMIT_WAITS_MIN):
-                    raise
-                wait = RATE_LIMIT_WAITS_MIN[limited]
-                limited += 1
+                if _backoff["step"] == len(RATE_LIMIT_WAITS_MIN):
+                    raise RateLimited from e
+                wait = RATE_LIMIT_WAITS_MIN[_backoff["step"]]
+                _backoff["step"] += 1
+                _backoff["ok"] = 0
                 print(f"  YouTube is rate limiting us, waiting {wait} min...")
                 time.sleep(wait * 60)
                 continue
@@ -234,6 +248,8 @@ def main() -> None:
             import_csv(yt, path, name, "PUBLIC" if args.public else "PRIVATE", args.dry_run, args.delay)
     except LoginExpired:
         sys.exit(f"\nLogin expired. Progress is saved: run `{APP} login` again, then the same command.")
+    except RateLimited:
+        sys.exit("\nYouTube keeps blocking searches. Progress is saved: try again in a few hours.")
     except KeyboardInterrupt:
         sys.exit("\nStopped. Progress is saved, run the same command to continue.")
 
